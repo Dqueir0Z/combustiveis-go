@@ -51,7 +51,7 @@ Spring Batch job "carga-precos"   parâmetros identificadores: fonte + sha256 (+
 PostgreSQL 16 (Docker) ── views vw_* ──► Power BI Desktop
 ```
 
-- **Stack:** Java 21, Spring Boot **3.5.x** (versão exata fixada no M0, com o Spring Batch 5 que ela gerencia), Gradle wrapper, PostgreSQL 16 em Docker Compose, Flyway, Apache Commons CSV, JUnit 5, Testcontainers, GitHub Actions.
+- **Stack:** Java 21, Spring Boot **4.1.1** (com o Spring Batch 6.0 que ela gerencia), Gradle wrapper, PostgreSQL 16 em Docker Compose, Flyway, Apache Commons CSV, JUnit (Jupiter 6, gerenciado pelo Boot), Testcontainers 2, GitHub Actions. O 3.5.x saiu porque perdeu o suporte gratuito em 30/06/2026 (ver "Histórico").
 - **Metadados do Batch:** criados por migração Flyway no schema `batch`, a partir do script da versão efetiva do Spring Batch. `spring.batch.jdbc.initialize-schema=never`.
 - **Identidade da carga:** a CLI calcula o sha256 do arquivo baixado e consulta `execucao`. Se o mesmo sha256 já foi publicado, termina com "sem novidade" **sem lançar o job**. Um arquivo novo gera um sha256 novo, e com ele uma nova instância. Um **reinício** usa os mesmos parâmetros e retoma do checkpoint. Para **reprocessar de propósito**, passe `--reprocessar`, que gera um parâmetro `reprocesso=<uuid>`.
 - **Uma fonte = um arquivo = um sha256.** A fonte fica entre os parâmetros identificadores, então os dois arquivos `ultimas4:*` nunca se confundem.
@@ -175,3 +175,4 @@ Revisão: cada PR passa por Claude e Codex (só leitura). O prazo de 2–3 seman
 
 - **v0.1 → v0.2** (crítica do Codex, thread `01a15ea9-2854-7c43-a9e9-61e1c621ad50`): identidade da carga por sha256 com pré-checagem; precedência explícita por prioridade de fonte; quarentena de conflitos; execução lógica estável; lock de executor único; reconciliação por categorias exclusivas; dimensões com chaves únicas e candidato único por CNPJ; semana ISO e cobertura; views por preço representativo do posto; marcos em fatia vertical; views 4 e 5 movidas para a v1.1; testes de proveniência, reinício e precedência.
 - **v0.2 (ajuste final, rodada 3):** `ultimas4` dividido em duas fontes independentes, uma por arquivo, cada uma com o seu sha256. **Consenso Claude + Codex sobre o plano**, sujeito às validações do M1 (chave, codificação, precedência).
+- **v0.2.1 (M0, 2026-10-21):** Spring Boot 3.5.x → **4.1.1**. O 3.5 perdeu o suporte gratuito em 30/06/2026 (endoflife.date) e o start.spring.io não gera mais projetos 3.5. O 4.0 perde o suporte em 31/12/2026, e o 4.1 vai até 31/07/2027. Consequência: Spring Batch 6.0 em vez de 5.2. Os conceitos (Job, Step, chunk, JobRepository) são os mesmos, mas as APIs mudam. Decisão do Diogo.
