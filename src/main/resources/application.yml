@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: combustiveis-go
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/combustiveis}
+    username: ${DB_USER:combustiveis}
+    password: ${DB_PASSWORD:combustiveis}
+  flyway:
+    locations: classpath:db/migration
+  batch:
+    job:
+      # Quem lança o job é a CLI (pré-checagem do sha256 + lock), nunca a subida da aplicação.
+      enabled: false
+    jdbc:
+      # Os metadados do Spring Batch são criados pela migração Flyway V1, no schema "batch".
+      initialize-schema: never
+      table-prefix: batch.BATCH_
