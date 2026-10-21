@@ -1,0 +1,6 @@
+dados/brutos/
+build/
+.gradle/
+.idea/
+*.iml
+.env
