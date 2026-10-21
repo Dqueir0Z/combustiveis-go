@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: combustiveis-go-db
+    environment:
+      POSTGRES_DB: combustiveis
+      POSTGRES_USER: combustiveis
+      # Senha só para desenvolvimento local; sobrescreva com um .env (ignorado pelo git).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-combustiveis}
+    ports:
+      # Só a máquina local alcança o banco (a senha padrão está no README).
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U combustiveis -d combustiveis"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
