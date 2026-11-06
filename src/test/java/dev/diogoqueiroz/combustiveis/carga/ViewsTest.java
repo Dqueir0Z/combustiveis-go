@@ -10,6 +10,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import dev.diogoqueiroz.combustiveis.fonte.ArquivoBaixado;
 import dev.diogoqueiroz.combustiveis.fonte.Fonte;
 import dev.diogoqueiroz.combustiveis.leitura.ColunaAnp;
 
@@ -46,6 +47,17 @@ class ViewsTest extends IntegracaoBase {
 		// GO: (6,10 + 6,50 + 7,00) / 3 = 6,5333. Goiânia: (6,10 + 6,50) / 2 = 6,30.
 		assertThat(semanal("GO")).containsEntry("preco_medio", "6.533").containsEntry("n_postos", 3L);
 		assertThat(semanal("GOIANIA")).containsEntry("preco_medio", "6.300").containsEntry("n_postos", 2L);
+	}
+
+	@Test
+	void postoEmDoisMunicipiosNaMesmaSemanaContaUmaVezEmGo() {
+		// Exemplo da revisão do Codex: A em Goiânia a 6,00 e em Anápolis a 8,00 na mesma semana; B a 10,00.
+		// Em GO são 2 postos: A com representativo 7,00 (as duas coletas) e B com 10,00. Média = 8,50.
+		preco("A", "GOIANIA", "GASOLINA", "2026-10-05", "6.00");
+		preco("A", "ANAPOLIS", "GASOLINA", "2026-10-07", "8.00");
+		preco("B", "GOIANIA", "GASOLINA", "2026-10-06", "10.00");
+
+		assertThat(semanal("GO")).containsEntry("preco_medio", "8.500").containsEntry("n_postos", 2L);
 	}
 
 	@Test
@@ -148,6 +160,37 @@ class ViewsTest extends IntegracaoBase {
 				com(GASOLINA_ANAPOLIS, ColunaAnp.DATA_COLETA, "13/10/2026")), false);
 
 		assertThat(execucao(carga.execucaoId()).get("aviso_cobertura")).isNull();
+	}
+
+	@Test
+	void avisoDoPainelEODaPublicacaoMaisRecenteNaoODaExecucaoCriadaPorUltimo() {
+		jdbc.execute("TRUNCATE fato_preco, dim_revenda, dim_municipio, dim_bandeira, execucao RESTART IDENTITY CASCADE");
+		// Execução 1 (semana 42) falha na publicação; a 2 (semanas 41 e 43) publica com a lacuna da 42;
+		// a 1 é retomada, publica por último e fecha a lacuna. O painel tem que mostrar "sem aviso".
+		ArquivoBaixado semana42 = arquivo(Fonte.ULTIMAS4_GASOLINA_ETANOL,
+				com(GASOLINA_ANAPOLIS, ColunaAnp.DATA_COLETA, "13/10/2026"));
+		jdbc.execute("""
+				CREATE FUNCTION falhar_fato() RETURNS trigger LANGUAGE plpgsql AS
+				$$ BEGIN RAISE EXCEPTION 'falha simulada'; END $$
+				""");
+		jdbc.execute("CREATE TRIGGER falhar_fato BEFORE INSERT ON fato_preco FOR EACH ROW EXECUTE FUNCTION falhar_fato()");
+		ResultadoCarga primeira;
+		try {
+			primeira = cargas.carregar(semana42, false);
+		}
+		finally {
+			jdbc.execute("DROP TRIGGER falhar_fato ON fato_preco");
+			jdbc.execute("DROP FUNCTION falhar_fato()");
+		}
+		ResultadoCarga segunda = cargas.carregar(arquivo(Fonte.ULTIMAS4_GASOLINA_ETANOL, GASOLINA_ANAPOLIS,
+				com(GASOLINA_ANAPOLIS, ColunaAnp.DATA_COLETA, "20/10/2026")), false);
+		assertThat(execucao(segunda.execucaoId()).get("aviso_cobertura")).isNotNull();
+
+		ResultadoCarga retomada = cargas.carregar(semana42, false);
+
+		assertThat(retomada.execucaoId()).isEqualTo(primeira.execucaoId()).isLessThan(segunda.execucaoId());
+		assertThat(execucao(retomada.execucaoId()).get("aviso_cobertura")).isNull();
+		assertThat(jdbc.queryForObject("SELECT aviso_cobertura FROM vw_atualizacao", String.class)).isNull();
 	}
 
 	private Map<String, Object> semanal(String nivel) {
