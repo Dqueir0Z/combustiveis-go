@@ -20,6 +20,12 @@ class CargaCliTest {
 	}
 
 	@Test
+	void primeiroSemestreDe2022UsaONomeForaDoPadraoDaAnp() {
+		assertThat(Fonte.semestral(2022, 1).url()).endsWith("/dsas/ca/precos-semestrais-ca.zip");
+		assertThat(Fonte.semestral(2022, 2).url()).endsWith("/dsas/ca/ca-2022-02.zip");
+	}
+
+	@Test
 	void intervaloInvalidoOuInvertidoERecusado() {
 		assertThatThrownBy(() -> CargaCli.semestrais("2022:2023")).isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> CargaCli.semestrais("2024-1:2023-2")).isInstanceOf(IllegalArgumentException.class);
