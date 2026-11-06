@@ -5,7 +5,9 @@ Pipeline de dados com os preços de combustíveis de Goiás (2022 em diante), a 
 
 A especificação completa, com metas, regras de limpeza, modelo de dados e marcos, está em [SPEC.md](SPEC.md).
 
-> **Estado:** M2 (fatia vertical). A atualização semanal carrega GO no modelo estrela e responde "onde o etanol compensa" (`vw_etanol_compensa`).
+> **Estado:** M4 concluído. O histórico de GO desde jan/2022 e a atualização semanal carregam no modelo estrela, e as três perguntas têm views testadas. Falta o M5: o painel no Power BI ([roteiro](docs/POWERBI.md)) e a medição de desempenho (ver "Carga histórica").
+
+Documentos: [SPEC.md](SPEC.md) (especificação), [docs/DECISOES.md](docs/DECISOES.md) (decisões e alternativas descartadas), [docs/inspecao](docs/inspecao/README.md) (inspeção dos dados da ANP) e [docs/POWERBI.md](docs/POWERBI.md) (painel).
 
 ## Stack
 
@@ -60,3 +62,25 @@ Feita antes de escrever o parser. Os detalhes, os números e o SQL reproduzível
 - **Volume:** o semestral 2026-1 tem 72 MB e 422.418 registros (16.573 de GO). O `ultimas4` de gasolina e etanol tem cerca de 8 MB e 47 mil registros (cerca de 1.900 de GO).
 - **Chave natural `(cnpj, produto, data_coleta)`:** zero conflitos nos quatro arquivos. O semestral tem 6 duplicatas idênticas.
 - **Precedência semestral > ultimas4:** ainda não é validável, porque não há período em comum entre os arquivos disponíveis. Dois snapshots do `ultimas4` vieram idênticos nas semanas em comum.
+
+## Carga histórica (medida em 06/11/2026)
+
+`java -Xmx256m -jar build/libs/combustiveis-go-0.0.1-SNAPSHOT.jar --historico=2022-1:2026-1`, numa máquina com Windows 11, Docker Desktop e PostgreSQL 16 no Compose:
+
+| | |
+|---|---|
+| Semestrais | 9 (2022-1 a 2026-1), todos publicados |
+| Registros lidos | 3.946.187 (Brasil) |
+| Preços de GO no fato | 154.337, de 03/01/2022 a 30/10/2026 (com a atualização semanal) |
+| Rejeitados | 0. A reconciliação fechou em todas as execuções |
+| Heap máximo | 256 MB (leitura em streaming) |
+| Tempo total | 36 min, incluindo ~100 s de downloads |
+
+O tempo da etapa de leitura variou de 21 s a 603 s entre semestrais de tamanho parecido, enquanto o parser sozinho processa um semestral em cerca de 5 s. A causa ainda está sendo investigada.
+
+**Lacunas:** a carga avisa 14 semanas sem dados. São a 2022-S38 e as semanas 28 a 40 de 2026, que o semestral 2026-2 vai cobrir quando a ANP publicá-lo.
+
+## Testes
+
+103 testes (JUnit + Testcontainers). Eles cobrem uma regra de limpeza por caso, com linhas reais da ANP, além de idempotência, precedência entre fontes, conflito atravessando chunks, reinício depois de falha, rollback da publicação, falha no commit, executor único e as views com resultado calculado à mão.
+

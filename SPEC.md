@@ -41,6 +41,7 @@ Fatos observados: ~47 mil linhas no arquivo de 4 semanas (Brasil), 1.872 de GO e
 - Os três tipos de arquivo são **UTF-8 com BOM**, `CRLF`, e têm o mesmo cabeçalho de 16 colunas. Nenhum campo tem quebra de linha.
 - O semestral `ca-2026-01` tem 72 MB descompactado e 422.418 registros (16.573 de GO). Ele inclui GNV (`R$ / m³`, fora do escopo). O nome do CSV dentro do zip está em CP437.
 - O servidor responde `403` a `HEAD`. Use `GET`.
+- O 1º semestre de 2022 foge do padrão de nome: é `.../dsas/ca/precos-semestrais-ca.zip` (o `ca-2022-01.zip` dá 404). O conteúdo e o layout são os mesmos (529.424 registros, 03/01–30/06/2022). Antes de 2022, os semestrais são `.csv` soltos, e ficam fora do escopo.
 - A chave `(cnpj, produto, data_coleta)` tem **zero conflitos** nos quatro arquivos inspecionados. O semestral tem 6 duplicatas, todas cópias idênticas.
 
 ## 5. Arquitetura
