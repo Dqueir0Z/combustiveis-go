@@ -8,6 +8,7 @@ import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.launch.JobOperator;
+import org.springframework.batch.core.launch.JobRestartException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -70,6 +71,13 @@ public class CargaService {
 				return new ResultadoCarga(fonte, Situacao.PUBLICADA, execucaoId, arquivo.sha256(), "publicada");
 			}
 			return new ResultadoCarga(fonte, Situacao.FALHOU, execucaoId, arquivo.sha256(), causa(job));
+		}
+		catch (JobRestartException e) {
+			// Ex.: a tentativa anterior falhou no commit e ficou UNKNOWN. O Batch recusa retomar de propósito,
+			// porque não sabe em que ponto parou; o caminho seguro é reler o arquivo inteiro numa instância nova.
+			log.error("{}: a tentativa anterior não pode ser retomada", fonte, e);
+			return new ResultadoCarga(fonte, Situacao.FALHOU, null, arquivo.sha256(),
+					"não dá para retomar a tentativa anterior (" + e.getMessage() + "). Rode de novo com --reprocessar.");
 		}
 		catch (Exception e) {
 			log.error("{}: o job não pôde ser lançado", fonte, e);

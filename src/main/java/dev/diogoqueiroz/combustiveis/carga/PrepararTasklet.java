@@ -35,6 +35,15 @@ public class PrepararTasklet implements Tasklet {
 		JobParameters parametros = job.getJobParameters();
 		ExecutionContext contextoDoJob = job.getExecutionContext();
 
+		// Uma tentativa anterior pode ter confirmado este step e caído antes de marcá-lo COMPLETED: reusa a execução
+		// em vez de criar uma segunda. Mas só se ela existir no banco: o id no contexto sobrevive a um rollback do
+		// INSERT (verificado em FalhasTest), então o contexto sozinho não prova nada.
+		if (contextoDoJob.containsKey(ParametrosCarga.EXECUCAO_ID) && Boolean.TRUE.equals(jdbc.queryForObject(
+				"SELECT EXISTS (SELECT 1 FROM execucao WHERE id = ?)", Boolean.class,
+				contextoDoJob.getLong(ParametrosCarga.EXECUCAO_ID)))) {
+			return RepeatStatus.FINISHED;
+		}
+
 		Long execucaoId = jdbc.queryForObject("""
 				INSERT INTO execucao (fonte, url, sha256, obtido_em, status)
 				VALUES (?, ?, ?, ?, 'EM_ANDAMENTO')
@@ -43,8 +52,9 @@ public class PrepararTasklet implements Tasklet {
 				parametros.getString(ParametrosCarga.SHA256),
 				OffsetDateTime.parse(parametros.getString(ParametrosCarga.OBTIDO_EM)));
 		contextoDoJob.putLong(ParametrosCarga.EXECUCAO_ID, execucaoId);
-		// O Batch só gravaria o contexto do job depois do step, em outra transação: se o processo morresse no
-		// meio, o reinício pularia este step sem saber o id. Gravando aqui, entra na mesma transação do INSERT.
+		// Grava o contexto do job já aqui: se o processo morrer depois do commit e antes de o Batch marcar o step,
+		// o reinício encontra o id. (Essa gravação não volta junto com um rollback do tasklet; por isso a
+		// verificação de existência acima.)
 		jobRepository.updateExecutionContext(job);
 		return RepeatStatus.FINISHED;
 	}
