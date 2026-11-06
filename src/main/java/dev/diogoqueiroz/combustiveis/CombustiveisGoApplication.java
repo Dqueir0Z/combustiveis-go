@@ -7,7 +7,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class CombustiveisGoApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(CombustiveisGoApplication.class, args);
+		// O código de saída da carga (CargaCli) vira o código de saída do processo.
+		System.exit(SpringApplication.exit(SpringApplication.run(CombustiveisGoApplication.class, args)));
 	}
 
 }

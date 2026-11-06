@@ -5,7 +5,7 @@ Pipeline de dados com os preços de combustíveis de Goiás (2022 em diante), a 
 
 A especificação completa, com metas, regras de limpeza, modelo de dados e marcos, está em [SPEC.md](SPEC.md).
 
-> **Estado:** M0 (esqueleto). Ainda não há carga de dados.
+> **Estado:** M2 (fatia vertical). A atualização semanal carrega GO no modelo estrela e responde "onde o etanol compensa" (`vw_etanol_compensa`).
 
 ## Stack
 
@@ -31,13 +31,21 @@ Pré-requisitos: **Java 21** e **Docker** (com o Docker Desktop aberto, no Windo
 
    No Windows (PowerShell ou cmd), use `.\gradlew.bat test`. Os testes **não** usam o banco do Compose: o Testcontainers sobe um PostgreSQL descartável para cada execução.
 
-3. Suba a aplicação (por enquanto ela só aplica as migrações e encerra):
+3. Carregue os dados. A aplicação aplica as migrações, baixa da ANP, carrega e encerra:
 
    ```bash
-   ./gradlew bootRun
+   ./gradlew bootRun --args="--atualizar"
    ```
 
-   A conexão pode ser trocada pelas variáveis `DB_URL`, `DB_USER` e `DB_PASSWORD`.
+   | Argumento | O que faz |
+   |---|---|
+   | `--atualizar` | atualização semanal: as duas fontes `ultimas4` (gasolina/etanol e diesel/GNV) |
+   | `--carga=FONTE` | uma fonte: `ultimas4:gasolina-etanol`, `ultimas4:diesel-gnv` ou `semestral:2026-1` |
+   | `--historico=2022-1:2026-1` | os semestrais do intervalo, em ordem |
+   | `--reprocessar` | carrega de novo, mesmo que o arquivo (sha256) já tenha sido publicado |
+   | `--rebaixar` | baixa o semestral de novo, ignorando o cache em `dados/brutos/` |
+
+   Repetir uma carga do mesmo arquivo responde "sem novidade" sem tocar no banco. O código de saída é 0 quando tudo deu certo, 1 quando alguma fonte falhou, 2 quando outra carga já está rodando e 3 quando um argumento é inválido. A conexão pode ser trocada pelas variáveis `DB_URL`, `DB_USER` e `DB_PASSWORD`.
 
 ### Banco de dados
 

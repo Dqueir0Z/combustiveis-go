@@ -1,0 +1,92 @@
+package dev.diogoqueiroz.combustiveis.carga;
+
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.BatchStatus;
+import org.springframework.batch.core.job.Job;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.launch.JobOperator;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import dev.diogoqueiroz.combustiveis.carga.ResultadoCarga.Situacao;
+import dev.diogoqueiroz.combustiveis.fonte.ArquivoBaixado;
+import dev.diogoqueiroz.combustiveis.fonte.Downloader;
+import dev.diogoqueiroz.combustiveis.fonte.Fonte;
+
+/**
+ * Carrega uma fonte: baixa, faz a pré-checagem do sha256 e, se houver novidade, lança o job.
+ */
+@Service
+public class CargaService {
+
+	private static final Logger log = LoggerFactory.getLogger(CargaService.class);
+
+	private final Downloader downloader;
+
+	private final JobOperator jobOperator;
+
+	private final Job cargaPrecos;
+
+	private final JdbcTemplate jdbc;
+
+	public CargaService(Downloader downloader, JobOperator jobOperator, Job cargaPrecos, JdbcTemplate jdbc) {
+		this.downloader = downloader;
+		this.jobOperator = jobOperator;
+		this.cargaPrecos = cargaPrecos;
+		this.jdbc = jdbc;
+	}
+
+	/** Uma falha no download vira FALHOU desta fonte, sem impedir as próximas (ex.: a segunda do --atualizar). */
+	public ResultadoCarga carregar(Fonte fonte, boolean reprocessar, boolean rebaixar) {
+		ArquivoBaixado arquivo;
+		try {
+			arquivo = downloader.baixar(fonte, rebaixar);
+		}
+		catch (RuntimeException e) {
+			log.error("{}: falha ao baixar", fonte.id(), e);
+			return new ResultadoCarga(fonte.id(), Situacao.FALHOU, null, null, "download: " + e.getMessage());
+		}
+		return carregar(arquivo, reprocessar);
+	}
+
+	/**
+	 * Pré-checagem: o mesmo sha256 já publicado termina em "sem novidade" sem lançar o job. Com os mesmos
+	 * parâmetros de uma tentativa que falhou, o Batch reinicia aquela instância a partir do checkpoint.
+	 */
+	public ResultadoCarga carregar(ArquivoBaixado arquivo, boolean reprocessar) {
+		String fonte = arquivo.fonte().id();
+		if (!reprocessar && jaPublicado(arquivo.sha256())) {
+			log.info("{}: sem novidade (sha256 {} já publicado)", fonte, arquivo.sha256());
+			return new ResultadoCarga(fonte, Situacao.SEM_NOVIDADE, null, arquivo.sha256(), "sha256 já publicado");
+		}
+		try {
+			JobExecution job = jobOperator.start(cargaPrecos, ParametrosCarga.de(arquivo, reprocessar));
+			Long execucaoId = job.getExecutionContext().containsKey(ParametrosCarga.EXECUCAO_ID)
+					? job.getExecutionContext().getLong(ParametrosCarga.EXECUCAO_ID) : null;
+			if (job.getStatus() == BatchStatus.COMPLETED) {
+				return new ResultadoCarga(fonte, Situacao.PUBLICADA, execucaoId, arquivo.sha256(), "publicada");
+			}
+			return new ResultadoCarga(fonte, Situacao.FALHOU, execucaoId, arquivo.sha256(), causa(job));
+		}
+		catch (Exception e) {
+			log.error("{}: o job não pôde ser lançado", fonte, e);
+			return new ResultadoCarga(fonte, Situacao.FALHOU, null, arquivo.sha256(), e.getMessage());
+		}
+	}
+
+	private boolean jaPublicado(String sha256) {
+		Boolean existe = jdbc.queryForObject(
+				"SELECT EXISTS (SELECT 1 FROM execucao WHERE sha256 = ? AND status = 'PUBLICADA')", Boolean.class,
+				sha256);
+		return Boolean.TRUE.equals(existe);
+	}
+
+	private static String causa(JobExecution job) {
+		List<Throwable> falhas = job.getAllFailureExceptions();
+		return falhas.isEmpty() ? job.getExitStatus().getExitDescription() : falhas.getFirst().getMessage();
+	}
+
+}
