@@ -145,6 +145,31 @@ public class PublicarTasklet implements Tasklet {
 			       AND EXCLUDED.execucao_id > fato_preco.execucao_id)
 			""";
 
+	/**
+	 * Lacunas pela cobertura (SPEC seção 8): toda semana ISO entre a primeira e a última com dados no fato
+	 * deveria ter dados. As que não têm viram um aviso com o semestral a carregar (pela quinta-feira da
+	 * semana, que decide a qual semestre ela pertence). A recuperação é manual na v1.
+	 */
+	private static final String AVISO_COBERTURA = """
+			WITH limites AS (
+			    SELECT date_trunc('week', min(data))::date AS de, date_trunc('week', max(data))::date AS ate
+			    FROM fato_preco
+			), faltando AS (
+			    SELECT s::date AS semana
+			    FROM limites, generate_series(de, ate, interval '1 week') AS s
+			    WHERE NOT EXISTS (SELECT 1 FROM fato_preco f WHERE f.data >= s::date AND f.data < s::date + 7)
+			), semestrais AS (
+			    SELECT DISTINCT 'semestral:' || extract(year FROM semana + 3) || '-'
+			           || CASE WHEN extract(month FROM semana + 3) <= 6 THEN 1 ELSE 2 END AS fonte
+			    FROM faltando
+			)
+			SELECT 'Faltam ' || count(*) || ' semana(s) sem dados ('
+			       || string_agg(to_char(semana, 'IYYY-"S"IW'), ', ' ORDER BY semana)
+			       || '). Carregue: ' || (SELECT string_agg(fonte, ', ' ORDER BY fonte) FROM semestrais) || '.'
+			FROM faltando
+			HAVING count(*) > 0
+			""";
+
 	private final JdbcTemplate jdbc;
 
 	private final JobRepository jobRepository;
@@ -197,16 +222,22 @@ public class PublicarTasklet implements Tasklet {
 					+ descartadas + " + duplicadas=" + duplicadas + " + rejeitadas=" + rejeitadas);
 		}
 
+		// Sem lacuna, a consulta não devolve linha (HAVING), e o aviso fica nulo.
+		String avisoCobertura = jdbc.queryForList(AVISO_COBERTURA, String.class).stream().findFirst().orElse(null);
+		if (avisoCobertura != null) {
+			log.warn("Execução {}: {}", execucaoId, avisoCobertura);
+		}
+
 		jdbc.update("""
 				UPDATE execucao
-				SET status = 'PUBLICADA', fim = now(),
+				SET status = 'PUBLICADA', fim = now(), aviso_cobertura = ?,
 				    periodo_min = (SELECT min(data_coleta) FROM stg_preco WHERE execucao_id = ?),
 				    periodo_max = (SELECT max(data_coleta) FROM stg_preco WHERE execucao_id = ?),
 				    lidas = ?, aceitas = ?, descartadas = ?, duplicadas = ?, rejeitadas = ?,
 				    inseridos = ?, atualizados = ?, sem_mudanca = ?
 				WHERE id = ?
-				""", execucaoId, execucaoId, lidas, aceitas, descartadas, duplicadas, rejeitadas, inseridos,
-				atualizados, aceitas - inseridos - atualizados, execucaoId);
+				""", avisoCobertura, execucaoId, execucaoId, lidas, aceitas, descartadas, duplicadas, rejeitadas,
+				inseridos, atualizados, aceitas - inseridos - atualizados, execucaoId);
 		jdbc.update("DELETE FROM stg_preco WHERE execucao_id = ?", execucaoId);
 
 		log.info("Execução {} publicada: lidas={} aceitas={} descartadas={} duplicadas={} rejeitadas={} "
