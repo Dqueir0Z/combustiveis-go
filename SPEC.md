@@ -35,7 +35,13 @@ Página: https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/serie-h
 
 Cabeçalho observado: `Regiao - Sigla;Estado - Sigla;Municipio;Revenda;CNPJ da Revenda;Nome da Rua;Numero Rua;Complemento;Bairro;Cep;Produto;Data da Coleta;Valor de Venda;Valor de Compra;Unidade de Medida;Bandeira`
 
-Fatos observados: ~47 mil linhas no arquivo de 4 semanas (Brasil), 1.872 de GO e 666 de Goiânia. O CNPJ vem com espaço à esquerda, o valor tem vírgula decimal, "Valor de Compra" vem vazio, a data é `dd/MM/yyyy` e a acentuação é mista. Em 20/10 a página foi atualizada, mas os dados mais recentes eram de 22–24/09 (há defasagem). A **codificação, o tamanho e a chave dos arquivos semestrais não foram verificados**: isso é o primeiro passo do M1.
+Fatos observados: ~47 mil linhas no arquivo de 4 semanas (Brasil), 1.872 de GO e 666 de Goiânia. O CNPJ vem com espaço à esquerda, o valor tem vírgula decimal, "Valor de Compra" vem vazio, a data é `dd/MM/yyyy` e a acentuação é mista. A defasagem varia: em 20/10 os dados mais recentes eram de 22–24/09; em 06/11, de 30/10.
+
+**Inspeção do M1** (detalhes e SQL em [docs/inspecao](docs/inspecao/README.md)):
+- Os três tipos de arquivo são **UTF-8 com BOM**, `CRLF`, e têm o mesmo cabeçalho de 16 colunas. Nenhum campo tem quebra de linha.
+- O semestral `ca-2026-01` tem 72 MB descompactado e 422.418 registros (16.573 de GO). Ele inclui GNV (`R$ / m³`, fora do escopo). O nome do CSV dentro do zip está em CP437.
+- O servidor responde `403` a `HEAD`. Use `GET`.
+- A chave `(cnpj, produto, data_coleta)` tem **zero conflitos** nos quatro arquivos inspecionados. O semestral tem 6 duplicatas, todas cópias idênticas.
 
 ## 5. Arquitetura
 
@@ -60,6 +66,7 @@ PostgreSQL 16 (Docker) ── views vw_* ──► Power BI Desktop
 - **Execução lógica estável:** `execucao.id` é criado no step 0 e guardado no ExecutionContext do job. Num reinício, o step 0 já está COMPLETED e não roda de novo, então o staging dos chunks já confirmados é preservado.
 - **Falha rápida de layout:** colunas mapeadas por nome. Se faltar uma coluna obrigatória, o job aborta. Colunas extras são ignoradas e registradas no log.
 - **Codificação por fonte**, com `CodingErrorAction.REPORT`: caractere inválido gera `PARSE_INVALIDO`, nunca substituição silenciosa.
+- **Leitura por linha:** o leitor separa o arquivo em linhas no nível dos bytes, decodifica cada linha em UTF-8 estrito e só então faz o parse CSV daquela linha. Assim, um registro com aspas quebradas, número errado de colunas ou byte inválido vira `PARSE_INVALIDO` sem derrubar o resto do arquivo, e `n_registro`/`conteudo_bruto` saem exatos. Isso vale porque a inspeção não achou nenhum campo multilinha. Se a ANP passar a usar um, esse registro vira `PARSE_INVALIDO`, e o problema aparece em vez de ser engolido. O BOM é removido antes do cabeçalho.
 
 ## 6. Regras de limpeza e reconciliação
 
@@ -87,7 +94,8 @@ Todo registro lido cai em **exatamente uma** categoria:
 | Bandeira | maiúsculas e sem acento; vazia vira `NAO INFORMADA` (diferente de `BRANCA`, que é um valor explícito da ANP) | — |
 | Chave | mesma chave natural com valores **divergentes** no mesmo arquivo: **todas** as ocorrências são rejeitadas | `CONFLITO` |
 
-- A chave natural é `(cnpj, produto, data_coleta)`, as três obrigatórias. É uma **hipótese** a validar na inspeção do M1, nas duas fontes.
+- A chave natural é `(cnpj, produto, data_coleta)`, as três obrigatórias. **Validada no M1:** zero conflitos nas duas fontes. A regra de conflito continua como proteção.
+- "Valores divergentes" = qualquer diferença nos campos limpos fora da chave. Os conflitos são resolvidos **antes** das duplicatas: com A, A e B na mesma chave, as três linhas vão para `rejeito` como `CONFLITO`, e nenhuma conta como duplicada.
 - O conflito é detectado no step 2, sobre o staging inteiro da execução, antes de publicar. Por isso um conflito que atravessa chunks também é pego.
 - `rejeito(execucao_id, arquivo, n_registro, motivo, conteudo_bruto)`.
 - A publicação conta separadamente `inseridos`, `atualizados` e `sem_mudanca`. Um upsert que não muda o conteúdo conta como `sem_mudanca`, mesmo que atualize a proveniência.
@@ -105,7 +113,8 @@ Todo registro lido cai em **exatamente uma** categoria:
   1. `fonte_prioridade`: semestral (consolidado) = 2, `ultimas4:*` (preliminar) = 1. A prioridade maior vence.
   2. Com a mesma prioridade, vence a execução publicada por último (`execucao_id` maior).
   3. Prioridade menor **nunca** sobrescreve prioridade maior.
-  É uma hipótese ("consolidado é mais correto que preliminar"), validada no M1 comparando as semanas que aparecem nas duas fontes. Se a inspeção mostrar o contrário, a regra muda aqui antes do código.
+  É uma hipótese ("consolidado é mais correto que preliminar"). **No M1 não foi possível validá-la:** o semestral mais recente termina em 30/06/2026, e os `ultimas4` disponíveis começam em 21/09/2026. Entre dois snapshots do `ultimas4` (21/10 e 06/11), as 23.564 chaves em comum vieram idênticas. A regra fica como hipótese declarada, a validar quando sair o semestral 2026-2, contra os `ultimas4` guardados em `dados/brutos/`.
+  4. Um registro que a precedência impede de sobrescrever conta como `sem_mudanca` (o fato não mudou).
 - A publicação (dimensões, fato, rejeitos de conflito e `execucao.fim`/`status`) acontece numa **única transação**.
 
 ## 8. Perguntas de negócio (views da v1)
@@ -146,11 +155,11 @@ v1.1: `vw_bandeira_relativa` (comparando dentro de município + produto + semana
 | Marco | Entrega | Quem escreve |
 |---|---|---|
 | M0 | Esqueleto: Gradle, Compose, Flyway (incl. metadados do Batch), CI, README inicial | Claude (boilerplate) |
-| M1 | **Inspeção real** das duas fontes (tamanho, registros, codificação, tempo, chave, comparação semestral × ultimas4) registrada no README. Parser e regras de limpeza com testes unitários | **Diogo** (Claude orienta e revisa) |
-| M2 | **Fatia vertical:** ultimas4 → staging → fato → `vw_etanol_compensa` → conexão do Power BI testada | **Diogo** com guia |
-| M3 | Idempotência, pré-checagem, conflitos, precedência, reinício, lock, reconciliação + testes de integração | **Diogo** |
-| M4 | Histórico 2022+ e as views 1 e 3 + testes de SQL | **Diogo** |
-| M5 | README (arquitetura, decisões, qualidade, cobertura, tempo e memória medidos), `.pbix`, prints, post no LinkedIn | **Diogo** |
+| M1 | **Inspeção real** das duas fontes (tamanho, registros, codificação, tempo, chave, comparação semestral × ultimas4) registrada no README. Parser e regras de limpeza com testes unitários | Inspeção: Diogo e Claude. Parser: Claude; o Diogo explica em aula |
+| M2 | **Fatia vertical:** ultimas4 → staging → fato → `vw_etanol_compensa` → conexão do Power BI testada | Claude; o Diogo explica em aula. Conexão do Power BI: Diogo |
+| M3 | Idempotência, pré-checagem, conflitos, precedência, reinício, lock, reconciliação + testes de integração | Claude; o Diogo explica em aula |
+| M4 | Histórico 2022+ e as views 1 e 3 + testes de SQL | Claude; o Diogo explica em aula |
+| M5 | README (arquitetura, decisões, qualidade, cobertura, tempo e memória medidos), `.pbix`, prints, post no LinkedIn | README: Claude. `.pbix`, prints e post: Diogo |
 
 Revisão: cada PR passa por Claude e Codex (só leitura). O prazo de 2–3 semanas depende das horas reais por dia. Se apertar, as views 1 e 3 escorregam para a v1.1 antes de cortar teste.
 
@@ -166,7 +175,7 @@ Revisão: cada PR passa por Claude e Codex (só leitura). O prazo de 2–3 seman
 
 ## 12. Riscos que restam
 
-- A chave natural e a precedência entre fontes são hipóteses: o M1 confirma ou muda as duas antes do M2.
+- A precedência entre fontes segue como hipótese não validada (ver seção 7). A chave natural foi validada no M1.
 - O conector PostgreSQL do Power BI Desktop pode precisar de driver: testado já no M2.
 - O arquivo semestral pode ser grande: download para disco, leitura em streaming. Memória e tempo medidos no M1.
 - O prazo depende das horas disponíveis.
@@ -176,3 +185,4 @@ Revisão: cada PR passa por Claude e Codex (só leitura). O prazo de 2–3 seman
 - **v0.1 → v0.2** (crítica do Codex, thread `01a15ea9-2854-7c43-a9e9-61e1c621ad50`): identidade da carga por sha256 com pré-checagem; precedência explícita por prioridade de fonte; quarentena de conflitos; execução lógica estável; lock de executor único; reconciliação por categorias exclusivas; dimensões com chaves únicas e candidato único por CNPJ; semana ISO e cobertura; views por preço representativo do posto; marcos em fatia vertical; views 4 e 5 movidas para a v1.1; testes de proveniência, reinício e precedência.
 - **v0.2 (ajuste final, rodada 3):** `ultimas4` dividido em duas fontes independentes, uma por arquivo, cada uma com o seu sha256. **Consenso Claude + Codex sobre o plano**, sujeito às validações do M1 (chave, codificação, precedência).
 - **v0.2.1 (M0, 2026-10-21):** Spring Boot 3.5.x → **4.1.1**. O 3.5 perdeu o suporte gratuito em 30/06/2026 (endoflife.date) e o start.spring.io não gera mais projetos 3.5. O 4.0 perde o suporte em 31/12/2026, e o 4.1 vai até 31/07/2027. Consequência: Spring Batch 6.0 em vez de 5.2. Os conceitos (Job, Step, chunk, JobRepository) são os mesmos, mas as APIs mudam. Decisão do Diogo.
+- **v0.3 (M1, 2026-11-06):** resultado da inspeção (seção 4). A chave natural foi validada, e a precedência continua como hipótese não validável por enquanto. Entraram a leitura por linha com decodificação estrita e a remoção do BOM (seção 5), a ordem conflito → duplicata e a definição de "divergente" (seção 6), e "bloqueado pela precedência conta como `sem_mudanca`" (seção 7). Nomes SQL em minúsculo `snake_case`. Mudou também quem escreve o código: o Claude implementa M1–M5, e o Diogo explica cada marco numa aula (decisão do Diogo).

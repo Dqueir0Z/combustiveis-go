@@ -46,4 +46,9 @@ Pré-requisitos: **Java 21** e **Docker** (com o Docker Desktop aberto, no Windo
 
 ## Inspeção dos dados da ANP
 
-Será preenchida no M1 (tamanho, número de registros, codificação, tempo, chave natural e comparação semestral × últimas 4 semanas).
+Feita antes de escrever o parser. Os detalhes, os números e o SQL reproduzível estão em [docs/inspecao](docs/inspecao/README.md). Em resumo:
+
+- **Formato:** UTF-8 **com BOM**, `CRLF`, `;` como separador, vírgula decimal, 16 colunas e nenhum campo multilinha. O servidor da ANP recusa `HEAD` (`403`).
+- **Volume:** o semestral 2026-1 tem 72 MB e 422.418 registros (16.573 de GO). O `ultimas4` de gasolina e etanol tem cerca de 8 MB e 47 mil registros (cerca de 1.900 de GO).
+- **Chave natural `(cnpj, produto, data_coleta)`:** zero conflitos nos quatro arquivos. O semestral tem 6 duplicatas idênticas.
+- **Precedência semestral > ultimas4:** ainda não é validável, porque não há período em comum entre os arquivos disponíveis. Dois snapshots do `ultimas4` vieram idênticos nas semanas em comum.
