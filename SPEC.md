@@ -85,12 +85,12 @@ Todo registro lido cai em **exatamente uma** categoria:
 | Estado | só `GO` (os outros são descartados) | — |
 | Produto | `GASOLINA`, `GASOLINA ADITIVADA`, `ETANOL`, `DIESEL`, `DIESEL S10` (os outros são descartados) | — |
 | CNPJ | só dígitos, exatamente 14 | `CNPJ_INVALIDO` |
-| Município | maiúsculas e sem acento | — |
+| Município | maiúsculas, sem acento e um espaço só entre palavras; vazio é rejeitado (o fato exige município) | `MUNICIPIO_AUSENTE` |
 | Data da Coleta | `dd/MM/yyyy`, não futura | `DATA_INVALIDA` |
-| Valor de Venda | número com vírgula decimal | `PRECO_NAO_NUMERICO` |
+| Valor de Venda | número com vírgula decimal, até 4 dígitos inteiros e 3 decimais (cabe em `numeric(7,3)`); ponto decimal ou milhar é rejeitado | `PRECO_NAO_NUMERICO` |
 | Valor de Venda | gasolina/aditivada: 2,00–12,00; etanol: 1,50–10,00; diesel/S10: 2,00–12,00 (R$/L) | `PRECO_FORA_FAIXA` |
 | Unidade | `R$ / litro` para os 5 produtos | `UNIDADE_INCOMPATIVEL` |
-| Valor de Compra | vazio vira `null` (não é erro) | — |
+| Valor de Compra | vazio vira `null` (não é erro); preenchido segue o formato do Valor de Venda | `PRECO_NAO_NUMERICO` |
 | Bandeira | maiúsculas e sem acento; vazia vira `NAO INFORMADA` (diferente de `BRANCA`, que é um valor explícito da ANP) | — |
 | Chave | mesma chave natural com valores **divergentes** no mesmo arquivo: **todas** as ocorrências são rejeitadas | `CONFLITO` |
 
