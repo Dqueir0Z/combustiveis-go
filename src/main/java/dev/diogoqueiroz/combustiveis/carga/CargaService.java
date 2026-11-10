@@ -7,8 +7,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.launch.JobRestartException;
+import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,9 @@ import dev.diogoqueiroz.combustiveis.fonte.Fonte;
 
 /**
  * Carrega uma fonte: baixa, faz a pré-checagem do sha256 e, se houver novidade, lança o job.
+ *
+ * <p>Quem chama tem que estar com o lock do {@link ExecutorUnico} (a {@link CargaCli} sempre está): é ele que
+ * permite tratar uma execução "em andamento" como órfã de uma queda.
  */
 @Service
 public class CargaService {
@@ -33,11 +38,15 @@ public class CargaService {
 
 	private final JdbcTemplate jdbc;
 
-	public CargaService(Downloader downloader, JobOperator jobOperator, Job cargaPrecos, JdbcTemplate jdbc) {
+	private final JobRepository jobRepository;
+
+	public CargaService(Downloader downloader, JobOperator jobOperator, Job cargaPrecos, JdbcTemplate jdbc,
+			JobRepository jobRepository) {
 		this.downloader = downloader;
 		this.jobOperator = jobOperator;
 		this.cargaPrecos = cargaPrecos;
 		this.jdbc = jdbc;
+		this.jobRepository = jobRepository;
 	}
 
 	/** Uma falha no download vira FALHOU desta fonte, sem impedir as próximas (ex.: a segunda do --atualizar). */
@@ -64,7 +73,9 @@ public class CargaService {
 			return new ResultadoCarga(fonte, Situacao.SEM_NOVIDADE, null, arquivo.sha256(), "sha256 já publicado");
 		}
 		try {
-			JobExecution job = jobOperator.start(cargaPrecos, ParametrosCarga.de(arquivo, reprocessar));
+			JobParameters parametros = ParametrosCarga.de(arquivo, reprocessar);
+			recuperarExecucaoOrfa(fonte, parametros);
+			JobExecution job = jobOperator.start(cargaPrecos, parametros);
 			Long execucaoId = job.getExecutionContext().containsKey(ParametrosCarga.EXECUCAO_ID)
 					? job.getExecutionContext().getLong(ParametrosCarga.EXECUCAO_ID) : null;
 			if (job.getStatus() == BatchStatus.COMPLETED) {
@@ -82,6 +93,20 @@ public class CargaService {
 		catch (Exception e) {
 			log.error("{}: o job não pôde ser lançado", fonte, e);
 			return new ResultadoCarga(fonte, Situacao.FALHOU, null, arquivo.sha256(), e.getMessage());
+		}
+	}
+
+	/**
+	 * Se o processo morreu no meio de uma carga, os metadados do Batch ficam "em andamento" para sempre, e o
+	 * Batch recusa lançar de novo. Como só um executor roda por vez (lock), uma execução "em andamento" que não é
+	 * a nossa só pode ser órfã: recover() a marca como FALHOU, e o start seguinte retoma do checkpoint.
+	 */
+	private void recuperarExecucaoOrfa(String fonte, JobParameters parametros) {
+		JobExecution ultima = jobRepository.getLastJobExecution(CargaPrecosJobConfig.JOB, parametros);
+		if (ultima != null && ultima.isRunning()) {
+			log.warn("{}: a execução {} ficou em andamento depois de uma queda; recuperando para retomar", fonte,
+					ultima.getId());
+			jobOperator.recover(ultima);
 		}
 	}
 

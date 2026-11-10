@@ -5,7 +5,8 @@ services:
     environment:
       POSTGRES_DB: combustiveis
       POSTGRES_USER: combustiveis
-      # Senha só para desenvolvimento local; sobrescreva com um .env (ignorado pelo git).
+      # Senha só para desenvolvimento local. Para trocar: POSTGRES_PASSWORD num .env (lido pelo Compose)
+      # E DB_PASSWORD com o mesmo valor no ambiente da aplicação (o .env não chega ao processo Java).
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-combustiveis}
     ports:
       # Só a máquina local alcança o banco (a senha padrão está no README).

@@ -1,6 +1,7 @@
 package dev.diogoqueiroz.combustiveis.carga;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +35,14 @@ public class LeitorAnpItemReader implements ItemStreamReader<RegistroBruto> {
 	@Override
 	public void open(ExecutionContext contexto) {
 		try {
-			leitor = new LeitorAnp(Files.newInputStream(arquivo));
+			InputStream entrada = Files.newInputStream(arquivo);
+			try {
+				leitor = new LeitorAnp(entrada);
+			}
+			catch (IOException | RuntimeException e) {
+				entrada.close();  // cabeçalho inválido: o leitor não chegou a existir para fechar o arquivo
+				throw e;
+			}
 			if (contexto.containsKey(LIDOS)) {
 				leitor.pular(contexto.getLong(LIDOS));
 			}

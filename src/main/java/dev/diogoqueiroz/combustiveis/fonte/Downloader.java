@@ -61,24 +61,52 @@ public class Downloader {
 		try {
 			Files.createDirectories(pastaBrutos);
 			Path cacheSemestral = pastaBrutos.resolve(fonte.id().replace(':', '-') + ".zip");
+			boolean usarCache = fonte.semestral() && Files.exists(cacheSemestral) && !rebaixar;
 			Path original;
-			if (fonte.semestral() && Files.exists(cacheSemestral) && !rebaixar) {
+			if (usarCache) {
 				log.info("{}: usando o arquivo em cache {}", fonte.id(), cacheSemestral);
 				original = cacheSemestral;
 			}
 			else {
 				original = baixarParaTemporario(fonte);
-				if (fonte.semestral()) {
+			}
+			try {
+				ArquivoBaixado arquivo = prepararCsv(fonte, original);
+				if (fonte.semestral() && !usarCache) {
+					// Só vira cache depois de o CSV ser extraído: um download inválido (HTML, zip corrompido)
+					// nunca substitui o cache, e a próxima tentativa baixa de novo.
 					Files.move(original, cacheSemestral, StandardCopyOption.REPLACE_EXISTING);
-					original = cacheSemestral;
+				}
+				return arquivo;
+			}
+			catch (IOException e) {
+				if (usarCache) {
+					log.warn("{}: o arquivo em cache é inválido e foi apagado; a próxima tentativa baixa de novo",
+							fonte.id());
+					Files.deleteIfExists(cacheSemestral);
+				}
+				throw e;
+			}
+			finally {
+				if (!usarCache) {
+					Files.deleteIfExists(original);
 				}
 			}
-			OffsetDateTime obtidoEm = OffsetDateTime.ofInstant(Files.getLastModifiedTime(original).toInstant(),
-					relogio.getZone());
-			String sha256 = sha256(original);
-			Path csv = pastaBrutos.resolve(sha256 + ".csv");
-			if (!Files.exists(csv)) {
-				Path temporario = Files.createTempFile(pastaBrutos, sha256, ".parcial");
+		}
+		catch (IOException e) {
+			throw new UncheckedIOException("falha ao obter " + fonte.id() + " de " + fonte.url(), e);
+		}
+	}
+
+	/** Identifica o arquivo pelo sha256 e deixa o CSV pronto em {@code dados/brutos/<sha256>.csv}. */
+	private ArquivoBaixado prepararCsv(Fonte fonte, Path original) throws IOException {
+		OffsetDateTime obtidoEm = OffsetDateTime.ofInstant(Files.getLastModifiedTime(original).toInstant(),
+				relogio.getZone());
+		String sha256 = sha256(original);
+		Path csv = pastaBrutos.resolve(sha256 + ".csv");
+		if (!Files.exists(csv)) {
+			Path temporario = Files.createTempFile(pastaBrutos, sha256, ".parcial");
+			try {
 				if (fonte.zip()) {
 					extrairUnicoCsv(original, temporario);
 				}
@@ -87,14 +115,11 @@ public class Downloader {
 				}
 				Files.move(temporario, csv, StandardCopyOption.ATOMIC_MOVE);
 			}
-			if (!fonte.semestral()) {
-				Files.delete(original);
+			finally {
+				Files.deleteIfExists(temporario);
 			}
-			return new ArquivoBaixado(fonte, sha256, obtidoEm, csv);
 		}
-		catch (IOException e) {
-			throw new UncheckedIOException("falha ao obter " + fonte.id() + " de " + fonte.url(), e);
-		}
+		return new ArquivoBaixado(fonte, sha256, obtidoEm, csv);
 	}
 
 	private Path baixarParaTemporario(Fonte fonte) throws IOException {

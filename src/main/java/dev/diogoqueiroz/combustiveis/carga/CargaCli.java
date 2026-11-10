@@ -95,14 +95,23 @@ public class CargaCli implements ApplicationRunner, ExitCodeGenerator {
 			fontes.addAll(Fonte.ATUALIZACAO_SEMANAL);
 		}
 		if (argumentos.containsOption("carga")) {
-			argumentos.getOptionValues("carga").forEach(id -> fontes.add(Fonte.doId(id)));
+			valores(argumentos, "carga").forEach(id -> fontes.add(Fonte.doId(id)));
 		}
 		if (argumentos.containsOption("historico")) {
-			for (String intervalo : argumentos.getOptionValues("historico")) {
+			for (String intervalo : valores(argumentos, "historico")) {
 				fontes.addAll(semestrais(intervalo));
 			}
 		}
 		return fontes;
+	}
+
+	/** "--carga" sem "=valor" não pode virar "nada a fazer" com código 0: para uma automação, pareceria sucesso. */
+	private static List<String> valores(ApplicationArguments argumentos, String opcao) {
+		List<String> valores = argumentos.getOptionValues(opcao);
+		if (valores.isEmpty() || valores.stream().anyMatch(String::isBlank)) {
+			throw new IllegalArgumentException("--" + opcao + " precisa de um valor (ex.: --" + opcao + "=...)");
+		}
+		return valores;
 	}
 
 	static List<Fonte> semestrais(String intervalo) {

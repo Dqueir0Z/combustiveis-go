@@ -37,6 +37,9 @@ public final class LeitorAnp implements Closeable {
 
 	private static final byte[] BOM = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF };
 
+	/** O byte 0x00 é UTF-8 válido, mas o PostgreSQL não aceita esse caractere em colunas text. */
+	private static final String NULO = String.valueOf((char) 0);
+
 	private static final CSVFormat FORMATO = CSVFormat.DEFAULT.builder().setDelimiter(';').get();
 
 	private final InputStream entrada;
@@ -76,7 +79,11 @@ public final class LeitorAnp implements Closeable {
 		}
 		catch (CharacterCodingException e) {
 			// A cópia bruta usa substituição só para poder ser gravada; o registro em si é recusado.
-			return RegistroBruto.ilegivel(numero, new String(bytes, StandardCharsets.UTF_8), "byte inválido para UTF-8");
+			return RegistroBruto.ilegivel(numero, gravavel(new String(bytes, StandardCharsets.UTF_8)),
+					"byte inválido para UTF-8");
+		}
+		if (texto.contains(NULO)) {
+			return RegistroBruto.ilegivel(numero, gravavel(texto), "byte nulo (0x00) na linha");
 		}
 
 		List<String> campos;
@@ -180,6 +187,11 @@ public final class LeitorAnp implements Closeable {
 			return Arrays.copyOf(bytes, bytes.length - 1);
 		}
 		return bytes;
+	}
+
+	/** A cópia bruta vai para a quarentena; o 0x00 vira o texto "\\0" para poder ser gravado. */
+	private static String gravavel(String texto) {
+		return texto.replace(NULO, "\\0");
 	}
 
 	private String decodificar(byte[] bytes) throws CharacterCodingException {

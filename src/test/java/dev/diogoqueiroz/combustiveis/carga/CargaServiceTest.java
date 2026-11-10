@@ -24,7 +24,7 @@ class CargaServiceTest {
 				throw new UncheckedIOException("falha ao obter " + fonte.id(), new ConnectException("sem rede"));
 			}
 		};
-		CargaService cargas = new CargaService(semRede, null, null, null);
+		CargaService cargas = new CargaService(semRede, null, null, null, null);
 
 		ResultadoCarga resultado = cargas.carregar(Fonte.ULTIMAS4_GASOLINA_ETANOL, false, false);
 

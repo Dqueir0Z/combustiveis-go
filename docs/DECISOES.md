@@ -51,6 +51,10 @@ A gravação imediata cobre a queda entre o commit do `preparar` e o momento em 
 Quando o commit de um chunk falha, o Batch não consegue gravar os metadados do step e marca o job como `UNKNOWN`. Ele recusa a retomada de propósito, porque não sabe em que ponto parou. O teste confirmou que o checkpoint persistido não adianta. A CLI transforma a recusa numa instrução: rode com `--reprocessar`, que relê o arquivo inteiro numa instância nova.
 *Descartado:* forçar a retomada marcando o job como abandonado ou mexendo nos metadados. Seria trocar uma garantia do framework por um palpite.
 
+**Execução órfã depois de uma queda do processo: `recover()` do Batch, autorizado pelo lock.**
+Se o processo morre no meio de uma carga, os metadados do Batch ficam "em andamento" para sempre, e ele recusa lançar de novo. Como só um executor roda por vez, uma execução "em andamento" encontrada por quem tem o lock só pode ser órfã. O `JobOperator.recover()` a marca como FALHOU, e o reinício retoma do checkpoint. O teste simula a queda e confere que a carga retoma e publica certo.
+*Descartado:* corrigir os metadados com SQL na mão.
+
 **Lock consultivo do PostgreSQL para um executor por vez.**
 Vale entre processos e máquinas, e o banco o libera sozinho se o processo morrer.
 *Descartado:* um arquivo `.lock` no disco. Só vale na mesma máquina e fica para trás quando o processo cai.

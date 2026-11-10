@@ -1,13 +1,37 @@
 # combustiveis-go
 
+[![CI](https://github.com/Dqueir0Z/combustiveis-go/actions/workflows/ci.yml/badge.svg)](https://github.com/Dqueir0Z/combustiveis-go/actions/workflows/ci.yml)
+
 Pipeline de dados com os preços de combustíveis de Goiás (2022 em diante), a partir dos dados abertos da ANP:
 **ANP → Spring Batch → PostgreSQL (modelo estrela) → Power BI**.
 
-A especificação completa, com metas, regras de limpeza, modelo de dados e marcos, está em [SPEC.md](SPEC.md).
+Responde três perguntas, cada uma numa view testada:
 
-> **Estado:** M4 concluído. O histórico de GO desde jan/2022 e a atualização semanal carregam no modelo estrela, e as três perguntas têm views testadas. Falta o M5: o painel no Power BI ([roteiro](docs/POWERBI.md)) e a medição de desempenho (ver "Carga histórica").
+1. **Quanto custa cada combustível por semana**, em Goiás e em Goiânia (`vw_preco_semanal`).
+2. **Onde o etanol compensa.** Na semana de 26/10/2026, em Goiânia, a mediana da razão etanol/gasolina foi 0,585, e o etanol compensou nos 42 postos comparados (`vw_etanol_compensa`).
+3. **Quanto o preço variou de uma semana para a outra**, comparando os mesmos postos (`vw_variacao_semanal`).
 
-Documentos: [SPEC.md](SPEC.md) (especificação), [docs/DECISOES.md](docs/DECISOES.md) (decisões e alternativas descartadas), [docs/inspecao](docs/inspecao/README.md) (inspeção dos dados da ANP) e [docs/POWERBI.md](docs/POWERBI.md) (painel).
+Documentos:
+- [SPEC.md](SPEC.md): especificação, com metas, regras e histórico de mudanças.
+- [docs/DECISOES.md](docs/DECISOES.md): cada decisão técnica, o motivo e a alternativa descartada.
+- [docs/inspecao](docs/inspecao/README.md): a inspeção dos dados reais, feita antes do código.
+- [docs/POWERBI.md](docs/POWERBI.md): o painel.
+
+## Arquitetura
+
+```
+CLI ─► lock (pg_try_advisory_lock) ─► download (GET) ─► sha256 já publicado? ─► "sem novidade"
+                                                              │ não
+                                                              ▼
+Spring Batch job "carga-precos" (um arquivo = uma instância: fonte + sha256)
+  1. preparar    cria a execução lógica (execucao.id)
+  2. ler-limpar  chunks de 10.000: LeitorAnp (streaming, UTF-8 estrito) ► Limpador ► stg_preco | rejeito
+                 checkpoint no ExecutionContext a cada commit (o reinício retoma dali)
+  3. publicar    UMA transação: conflitos ► duplicatas ► dimensões ► upsert com precedência
+                 ► reconciliação (lidas = aceitas + descartadas + duplicadas + rejeitadas) ► aviso de lacunas
+                                                              │
+PostgreSQL 16 ── estrela (fato_preco + 5 dimensões) ── views vw_* ──► Power BI
+```
 
 ## Stack
 
@@ -47,7 +71,7 @@ Pré-requisitos: **Java 21** e **Docker** (com o Docker Desktop aberto, no Windo
    | `--reprocessar` | carrega de novo, mesmo que o arquivo (sha256) já tenha sido publicado |
    | `--rebaixar` | baixa o semestral de novo, ignorando o cache em `dados/brutos/` |
 
-   Repetir uma carga do mesmo arquivo responde "sem novidade" sem tocar no banco. O código de saída é 0 quando tudo deu certo, 1 quando alguma fonte falhou, 2 quando outra carga já está rodando e 3 quando um argumento é inválido. A conexão pode ser trocada pelas variáveis `DB_URL`, `DB_USER` e `DB_PASSWORD`.
+   Repetir uma carga do mesmo arquivo responde "sem novidade" sem tocar no banco. O código de saída é 0 quando tudo deu certo, 1 quando alguma fonte falhou, 2 quando outra carga já está rodando e 3 quando um argumento é inválido. A conexão pode ser trocada pelas variáveis `DB_URL`, `DB_USER` e `DB_PASSWORD`. Para trocar a senha do banco, defina `POSTGRES_PASSWORD` num `.env`, que o Compose lê, **e** `DB_PASSWORD` com o mesmo valor no ambiente da aplicação, porque o `.env` não chega ao processo Java.
 
 ### Banco de dados
 
@@ -85,5 +109,9 @@ Feita antes de escrever o parser. Os detalhes, os números e o SQL reproduzível
 
 ## Testes
 
-103 testes (JUnit + Testcontainers). Eles cobrem uma regra de limpeza por caso, com linhas reais da ANP, além de idempotência, precedência entre fontes, conflito atravessando chunks, reinício depois de falha, rollback da publicação, falha no commit, executor único e as views com resultado calculado à mão.
+108 testes (JUnit + Testcontainers). Eles cobrem uma regra de limpeza por caso, com linhas reais da ANP, além de idempotência, precedência entre fontes, conflito atravessando chunks, reinício depois de falha, recuperação depois de uma queda do processo, rollback da publicação, falha no commit, cache corrompido, executor único e as views com resultado calculado à mão.
+
+## Licença
+
+[MIT](LICENSE). Os dados são da ANP (Agência Nacional do Petróleo, Gás Natural e Biocombustíveis), publicados como dados abertos.
 

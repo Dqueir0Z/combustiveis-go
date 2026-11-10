@@ -1,5 +1,8 @@
 dados/brutos/
 .env
+.env.*
+*.jfr
+*.hprof
 
 ### Gradle ###
 .gradle/

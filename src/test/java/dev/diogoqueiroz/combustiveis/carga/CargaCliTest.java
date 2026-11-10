@@ -39,6 +39,15 @@ class CargaCliTest {
 	}
 
 	@Test
+	void opcaoSemValorERecusadaEmVezDeNaoFazerNada() {
+		assertThatThrownBy(() -> CargaCli.fontes(new DefaultApplicationArguments("--carga")))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("precisa de um valor");
+		assertThatThrownBy(() -> CargaCli.fontes(new DefaultApplicationArguments("--historico=")))
+			.isInstanceOf(IllegalArgumentException.class);
+	}
+
+	@Test
 	void fonteDesconhecidaERecusada() {
 		assertThatThrownBy(() -> CargaCli.fontes(new DefaultApplicationArguments("--carga=ultimas4:glp")))
 			.isInstanceOf(IllegalArgumentException.class)

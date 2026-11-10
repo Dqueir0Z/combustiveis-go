@@ -160,6 +160,27 @@ class ChunkPequenoTest extends IntegracaoBase {
 		assertThat(jdbc.queryForObject("SELECT count(*) FROM fato_preco", Long.class)).isEqualTo(4);
 	}
 
+	@Test
+	void execucaoOrfaDeUmaQuedaERecuperadaERetomaDoCheckpoint() {
+		ArquivoBaixado arquivo = arquivo(Fonte.ULTIMAS4_GASOLINA_ETANOL, dia(GASOLINA_ANAPOLIS, "01"),
+				dia(GASOLINA_ANAPOLIS, "02"), dia(GASOLINA_ANAPOLIS, "03"), dia(GASOLINA_ANAPOLIS, "04"),
+				dia(GASOLINA_ANAPOLIS, "05"));
+		FALHAR_NO_CHUNK.set(2);
+		assertThat(cargas.carregar(arquivo, false).situacao()).isEqualTo(Situacao.FALHOU);
+		// Simula a queda do processo: ele morreu antes de o Batch registrar a falha, e os metadados ficaram
+		// "em andamento". Sem recuperação, o Batch recusaria lançar de novo (JobExecutionAlreadyRunningException).
+		jdbc.update("UPDATE batch.batch_job_execution SET status = 'STARTED', exit_code = 'UNKNOWN', end_time = NULL "
+				+ "WHERE job_execution_id = (SELECT max(job_execution_id) FROM batch.batch_job_execution)");
+		jdbc.update("UPDATE batch.batch_step_execution SET status = 'STARTED', exit_code = 'EXECUTING', end_time = NULL "
+				+ "WHERE step_execution_id = (SELECT max(step_execution_id) FROM batch.batch_step_execution)");
+
+		ResultadoCarga retomada = cargas.carregar(arquivo, false);
+
+		assertThat(retomada.situacao()).isEqualTo(Situacao.PUBLICADA);
+		assertThat(execucao(retomada.execucaoId())).containsEntry("lidas", 5L).containsEntry("aceitas", 5L);
+		assertThat(jdbc.queryForObject("SELECT count(*) FROM fato_preco", Long.class)).isEqualTo(5);
+	}
+
 	private static String dia(String linha, String dia) {
 		return com(linha, ColunaAnp.DATA_COLETA, dia + "/10/2026");
 	}

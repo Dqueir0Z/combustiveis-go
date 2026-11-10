@@ -92,6 +92,19 @@ class LeitorAnpTest {
 	}
 
 	@Test
+	void byteNuloViraRegistroIlegivelComACopiaBrutaGravavel() throws IOException {
+		String comNulo = GASOLINA_ANAPOLIS.replace("ALVORADA", "ALVO" + (char) 0 + "RADA");
+		try (LeitorAnp leitor = leitor(arquivo(CABECALHO, comNulo, ETANOL_ANAPOLIS))) {
+			RegistroBruto ruim = leitor.proximo();
+
+			assertThat(ruim.ilegivel()).isTrue();
+			assertThat(ruim.erroParse()).contains("byte nulo");
+			assertThat(ruim.conteudoBruto()).contains("ALVO\\0RADA").doesNotContain(String.valueOf((char) 0));
+			assertThat(leitor.proximo().ilegivel()).isFalse();
+		}
+	}
+
+	@Test
 	void numeroErradoDeColunasViraRegistroIlegivel() throws IOException {
 		try (LeitorAnp leitor = leitor(arquivo(CABECALHO, GASOLINA_ANAPOLIS + ";EXTRA"))) {
 			RegistroBruto registro = leitor.proximo();
