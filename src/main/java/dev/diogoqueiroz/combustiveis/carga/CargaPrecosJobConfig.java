@@ -51,7 +51,7 @@ public class CargaPrecosJobConfig {
 	@Bean
 	Step lerLimpar(JobRepository repositorio, PlatformTransactionManager transacoes,
 			LeitorAnpItemReader leitorAnp, LimpezaProcessor limpeza,
-			StagingWriter stagingWriter, @Value("${combustiveis.chunk:1000}") int tamanhoDoChunk) {
+			StagingWriter stagingWriter, @Value("${combustiveis.chunk:10000}") int tamanhoDoChunk) {
 		return new StepBuilder(STEP_LER, repositorio).<RegistroBruto, ResultadoLimpeza>chunk(tamanhoDoChunk)
 			.transactionManager(transacoes)
 			.reader(leitorAnp)

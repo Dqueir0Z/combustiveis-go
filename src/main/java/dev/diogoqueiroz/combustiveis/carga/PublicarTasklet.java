@@ -28,10 +28,12 @@ public class PublicarTasklet implements Tasklet {
 
 	/**
 	 * Conflito: mesma chave com valores divergentes. Todas as ocorrências vão para a quarentena, inclusive
-	 * cópias idênticas entre elas, que assim não contam como duplicadas.
+	 * cópias idênticas entre elas, que assim não contam como duplicadas. MATERIALIZED obriga o banco a calcular
+	 * as chaves uma vez só: sem isso, o PostgreSQL embutia a CTE e, com o staging sem estatísticas, recalculava
+	 * o agrupamento para cada linha (215 s num semestral, medido em 10/11/2026).
 	 */
 	private static final String MOVER_CONFLITOS = """
-			WITH chaves AS (
+			WITH chaves AS MATERIALIZED (
 			    SELECT cnpj, produto, data_coleta
 			    FROM stg_preco
 			    WHERE execucao_id = ?
@@ -191,6 +193,8 @@ public class PublicarTasklet implements Tasklet {
 
 	@Override
 	public RepeatStatus execute(StepContribution contribuicao, ChunkContext contexto) {
+		// O staging acabou de receber milhares de linhas: sem estatísticas, o planejador escolhe planos ruins.
+		jdbc.execute("ANALYZE stg_preco");
 		jdbc.update(MOVER_CONFLITOS, execucaoId, execucaoId, execucaoId, arquivo);
 		long duplicadas = jdbc.update(REMOVER_DUPLICATAS, execucaoId, execucaoId);
 
