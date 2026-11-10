@@ -58,6 +58,10 @@ Vale entre processos e máquinas, e o banco o libera sozinho se o processo morre
 **Falhas de teste provocadas de fora: writer que falha uma vez, triggers temporários (inclusive adiados para o commit).**
 As falhas acontecem de verdade no meio da transação, sem caminho de teste dentro do código de produção.
 
+**Desempenho: medir antes de otimizar.**
+A carga histórica levou 36 minutos. Em vez de chutar a causa, a medição usou o JFR, o profiler da JVM, e o log de consultas lentas do PostgreSQL. O resultado: a CPU ficava parada, esperando o banco. Havia commits demais (chunk de 1.000 → 10.000) e uma CTE recalculada por linha (`MATERIALIZED` + `ANALYZE` no staging). O tempo caiu para 1 min 43 s.
+*Descartado:* `synchronous_commit=off`. Seria mais rápido, mas uma queda poderia perder commits já confirmados, e isso quebraria a garantia do checkpoint.
+
 ## Modelo e views (M2 e M4)
 
 **Estrela com chaves substitutas nas dimensões e a chave natural como `UNIQUE` no fato.**

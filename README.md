@@ -63,7 +63,7 @@ Feita antes de escrever o parser. Os detalhes, os números e o SQL reproduzível
 - **Chave natural `(cnpj, produto, data_coleta)`:** zero conflitos nos quatro arquivos. O semestral tem 6 duplicatas idênticas.
 - **Precedência semestral > ultimas4:** ainda não é validável, porque não há período em comum entre os arquivos disponíveis. Dois snapshots do `ultimas4` vieram idênticos nas semanas em comum.
 
-## Carga histórica (medida em 06/11/2026)
+## Carga histórica
 
 `java -Xmx256m -jar build/libs/combustiveis-go-0.0.1-SNAPSHOT.jar --historico=2022-1:2026-1`, numa máquina com Windows 11, Docker Desktop e PostgreSQL 16 no Compose:
 
@@ -74,9 +74,12 @@ Feita antes de escrever o parser. Os detalhes, os números e o SQL reproduzível
 | Preços de GO no fato | 154.337, de 03/01/2022 a 30/10/2026 (com a atualização semanal) |
 | Rejeitados | 0. A reconciliação fechou em todas as execuções |
 | Heap máximo | 256 MB (leitura em streaming) |
-| Tempo total | 36 min, incluindo ~100 s de downloads |
+| Tempo | **1 min 43 s** com os zips em cache (7 a 11 s por semestral), mais ~100 s de downloads numa carga do zero |
 
-O tempo da etapa de leitura variou de 21 s a 603 s entre semestrais de tamanho parecido, enquanto o parser sozinho processa um semestral em cerca de 5 s. A causa ainda está sendo investigada.
+**Desempenho, medido e não chutado.** A primeira medição deu 36 minutos, com tempos erráticos. O profiler (JFR) e o log de consultas lentas do PostgreSQL mostraram duas causas, nenhuma delas onde se esperava:
+
+1. **Commits demais.** Com chunk de 1.000, eram 422 commits por semestral, cada um esperando o fsync do PostgreSQL. No Docker do Windows, essa espera chegou a 4,35 s. Com chunk de 10.000, são 43 commits.
+2. **Um plano de consulta ruim.** A consulta de conflitos chegou a levar 215 s: o PostgreSQL embutia a CTE e, com o staging recém-carregado e sem estatísticas, recalculava o agrupamento para cada linha. A correção foi `MATERIALIZED` mais `ANALYZE stg_preco` antes da publicação, e a publicação caiu de 208 s para ~2 s.
 
 **Lacunas:** a carga avisa 14 semanas sem dados. São a 2022-S38 e as semanas 28 a 40 de 2026, que o semestral 2026-2 vai cobrir quando a ANP publicá-lo.
 
